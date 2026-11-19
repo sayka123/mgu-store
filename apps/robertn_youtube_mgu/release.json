@@ -1,6 +1,7 @@
 {
   "build": "node tools/build.js",
   "requires": {
+    "mgu-deploy": "next",
     "mgu-render": "0.4.0"
   }
 }

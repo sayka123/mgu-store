@@ -121,12 +121,18 @@ function testBundleMode() {
         run.stdout + run.stderr);
     const pkg = JSON.parse(m['package.json']);
     check('bundle: package.json marked local-only, and mguInternet from "internet"', pkg.mguLocalOnly === true && pkg.mguInternet === true);
+    const permissions = JSON.parse(m['permissions.json']);
+    const shrinkwrap = JSON.parse(m['npm-shrinkwrap.json']);
+    check('bundle: source package includes MainApp ACL tables and shrinkwrap in files[]',
+        pkg.files.indexOf('permissions.json') >= 0 && pkg.files.indexOf('npm-shrinkwrap.json') >= 0 &&
+            permissions.masterAccessTable.length === 0 && permissions.masterRegistrationTable.length === 0 &&
+            shrinkwrap.name === pkg.name && shrinkwrap.version === pkg.version);
     const bj = JSON.parse(m['javascript/build.json']);
     check('bundle: build.json', bj.name === 'robertn_demo' && bj.version === '1.2.3' && bj.buildTimestamp === 1700000000000 &&
         bj.bundle.entryModule === 10000 && bj.bundle.moduleCount === 5 && bj.bundle.appModules === 2 &&
         bj.bundle.sdkModulesFrom === r.donor, JSON.stringify(bj));
     check('bundle: the package is flat, its files[] packed, the source folder unchanged',
-        Object.keys(m).sort().join(' ') === 'javascript/app.js javascript/build.json javascript/runner.js package.json' &&
+        Object.keys(m).sort().join(' ') === 'javascript/app.js javascript/build.json javascript/runner.js npm-shrinkwrap.json package.json permissions.json' &&
         fs.readFileSync(path.join(src, 'robertn_demo@1.2.3', 'javascript', 'app.js'), 'utf8') === '// a stale build, never packed\n');
     const again = path.join(tmp('out'), 'again.tgz');
     link.build(src, again, { donors: [donorTgz], epoch: 1700000000 });
@@ -165,8 +171,9 @@ function testBundleMode() {
 
 function testYouTubeMguSourceBuild() {
     const appDir = path.join(REPO, 'apps', 'robertn_youtube_mgu');
+    const manifest = JSON.parse(fs.readFileSync(path.join(appDir, 'mgu-app.json'), 'utf8'));
     const donorFile = donor.tgz(path.join(tmp('youtube-donor'), 'donor_app@1.0.0.tgz'));
-    const out = path.join(tmp('youtube-out'), 'robertn_youtube_mgu@0.1.1.tgz');
+    const out = path.join(tmp('youtube-out'), `${manifest.id}@${manifest.version}.tgz`);
     let result = null;
     let error = null;
     try {
@@ -175,11 +182,19 @@ function testYouTubeMguSourceBuild() {
         error = e;
     }
     const pkg = result && members(out);
+    const packageJson = pkg && JSON.parse(pkg['package.json']);
+    const permissions = pkg && JSON.parse(pkg['permissions.json']);
+    const shrinkwrap = pkg && JSON.parse(pkg['npm-shrinkwrap.json']);
     check('youtube app: unit build links the declared local modules at its new version',
-        result && result.id === 'robertn_youtube_mgu' && result.version === '0.1.1' &&
-            JSON.parse(pkg['package.json']).version === '0.1.1' &&
+        result && result.id === manifest.id && result.version === manifest.version &&
+            JSON.parse(pkg['package.json']).version === manifest.version &&
             pkg['javascript/app.js'].toString().indexOf("require('./mgu_render_client.js')") >= 0,
         error && error.message);
+    check('youtube app: unit build includes MainApp-required ACL tables and shrinkwrap',
+        packageJson && packageJson.files.indexOf('permissions.json') >= 0 &&
+            packageJson.files.indexOf('npm-shrinkwrap.json') >= 0 &&
+            permissions.masterAccessTable.length === 0 && permissions.masterRegistrationTable.length === 0 &&
+            shrinkwrap.name === manifest.id && shrinkwrap.version === manifest.version);
 }
 
 /* A source package whose tree ships no entry point: package.json main

@@ -701,6 +701,7 @@ function build(srcDir, outFile, opts) {
             pkg.mguInternet = true;
             fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2) + (/\n$/.test(raw) ? '\n' : ''));
         }
+        completeInstallMetadata(work);
         const completed = completeCertification(work);
         const unknown = dropUnknownInterfaces(work, opts.interfaces || null);
         const moduleCount = donor.closure.length + modules.length;
@@ -772,6 +773,35 @@ function sdkModule(donors) {
  * npm-shrinkwrap.json and refuses one that has neither. */
 function needsShrinkwrap(pkgDir) {
     return !fs.existsSync(path.join(pkgDir, 'node_modules')) && !fs.existsSync(path.join(pkgDir, 'npm-shrinkwrap.json'));
+}
+
+/* MainApp needs a shrinkwrap for packages without node_modules and both
+ * permission tables. When files[] is present, include generated files there. */
+function completeInstallMetadata(pkgDir) {
+    const shrinkwrap = needsShrinkwrap(pkgDir);
+    if (shrinkwrap) {
+        const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
+        fs.writeFileSync(path.join(pkgDir, 'npm-shrinkwrap.json'), JSON.stringify({ name: pkg.name, version: pkg.version,
+            lockfileVersion: 1, requires: true, dependencies: {} }, null, 2) + '\n');
+    }
+    const permissions = completePermissions(pkgDir);
+    const pkg = stampPackage(pkgDir);
+    if (pkg.files !== undefined) {
+        if (!Array.isArray(pkg.files)) {
+            throw new Error(`${path.join(pkgDir, 'package.json')}: files must be an array`);
+        }
+        let changed = false;
+        ['npm-shrinkwrap.json', 'permissions.json'].forEach((name) => {
+            if (fs.existsSync(path.join(pkgDir, name)) && pkg.files.indexOf(name) < 0) {
+                pkg.files.push(name);
+                changed = true;
+            }
+        });
+        if (changed) {
+            fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
+        }
+    }
+    return { shrinkwrap, permissions };
 }
 
 /* MainApp's aclManager.js reads both tables of an app's permissions.json
@@ -916,19 +946,12 @@ function preparePackage(pkgDir, outFile, opts) {
         nodeCheck(path.join(dir, 'index.js'));
         sdk = { donor: m.donor, api: m.api };
     }
-    const shrinkwrap = needsShrinkwrap(pkgDir);
-    if (shrinkwrap) {
-        const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
-        fs.writeFileSync(path.join(pkgDir, 'npm-shrinkwrap.json'), JSON.stringify({ name: pkg.name, version: pkg.version,
-            lockfileVersion: 1, requires: true, dependencies: {} }, null, 2) + '\n');
-    }
-    const permissions = completePermissions(pkgDir);
+    const metadata = completeInstallMetadata(pkgDir);
     const certification = completeCertification(pkgDir);
     const unknown = dropUnknownInterfaces(pkgDir, opts.interfaces || null);
-    stampPackage(pkgDir);
     fs.writeFileSync(outFile, tgz(filesBelow(pkgDir).map((name) =>
         ({ name, data: fs.readFileSync(path.join(pkgDir, name)), mode: 0o644 })), MTIME));
-    return { file: outFile, sdk, shrinkwrap, permissions, certification, unknown };
+    return { file: outFile, sdk, shrinkwrap: metadata.shrinkwrap, permissions: metadata.permissions, certification, unknown };
 }
 
 function rmrf(p) {

@@ -230,7 +230,10 @@ script. Version and title come from it and the staged tree:
 
 The head unit links the modules against the oap-sdk modules of its donor
 into `javascript/app.js` (`tools/oap_link.js`, with the donor's module ids)
-and installs the package. The same build runs on a desktop with
+and installs the package. The build supplies a minimal
+`npm-shrinkwrap.json` when the package has no `node_modules`, and ensures
+`permissions.json` contains both AppManager ACL tables; generated files are
+added to `package.json`'s `files` list. The same build runs on a desktop with
 `apps/<id>/tools/build.js --sdk <donor>`.
 [`apps/robertn_store`](../apps/robertn_store) is a complete example.
 

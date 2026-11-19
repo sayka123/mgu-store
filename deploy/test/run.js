@@ -5358,6 +5358,14 @@ function testSourcePackages() {
         r.out.includes('built robertn_demo 1.2.3') && m['javascript/app.js'] && m['javascript/runner.js'] &&
         JSON.parse(m['package.json']).mguLocalOnly === true && JSON.parse(m['package.json']).mguInternet === true &&
         root.status().components.some((x) => x.id === 'robertn_demo' && x.version === '1.2.3'), r.out);
+    const installedPackage = m['package.json'] && JSON.parse(m['package.json']);
+    const installedPermissions = m['permissions.json'] && JSON.parse(m['permissions.json']);
+    const installedShrinkwrap = m['npm-shrinkwrap.json'] && JSON.parse(m['npm-shrinkwrap.json']);
+    check('source: installed package includes AppManager ACL tables and shrinkwrap',
+        installedPackage && installedPackage.files.indexOf('permissions.json') >= 0 &&
+            installedPackage.files.indexOf('npm-shrinkwrap.json') >= 0 &&
+            installedPermissions.masterAccessTable.length === 0 && installedPermissions.masterRegistrationTable.length === 0 &&
+            installedShrinkwrap.name === 'robertn_demo' && installedShrinkwrap.version === '1.2.3');
     const again = root.run(['install', '--artifact', file, '--yes']);
     check('source: the same version again is not built', again.status === 0 && again.out.includes('already installed') &&
         !again.out.includes('built robertn_demo'), again.out);
