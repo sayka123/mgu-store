@@ -19,11 +19,22 @@
         "hmi": ["ID8"]
       }
     ],
+    "stringBundleUuid": "702eec45-bc9a-49e7-ba48-7fee1f4af818",
+    "resourceBundleUuid": "eaa01b70-a779-42f5-8ca1-c96fd744c64b",
+    "variantGroups": [
+      {
+        "stringsPath": "./variantGroups/Common/texts",
+        "resourcesPath": "./variantGroups/Common/images",
+        "hmi": ["ID7", "ID8"],
+        "brands": ["BMW"]
+      }
+    ],
     "entryPoints": [
       {
         "name": "robertn_youtube_mgu",
         "uuid": "ef7f7e41-51a1-4f0a-bfd2-6a71bbfce871",
         "textId": "SID_YOUTUBE_MGU_TITLE",
+        "icon": "youtube_icon.png",
         "insertionStateId": 1,
         "insertionFocusId": 22,
         "insertionMode": "INSERT_BELOW",

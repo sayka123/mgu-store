@@ -42,7 +42,8 @@ class YouTubeMgu extends OnlineApp {
   }
 
   initialize() {
-    Promise.resolve(this.setupRhmi())
+    Promise.resolve()
+      .then(() => this.setupRhmi())
       .then(() => this.setupHttp())
       .then(() => this.setupRenderer())
       .then(() => this.registerEntryPoints())
@@ -55,6 +56,7 @@ class YouTubeMgu extends OnlineApp {
       .catch((e) => {
         this.status = 'Search unavailable';
         logger.warn('YouTube MGU startup failed: ' + e.message);
+        this.renderList();
       })
       .then(() => this.initialized())
       .catch((e) => logger.error('YouTube MGU initialization failed: ' + e.message));
@@ -99,7 +101,8 @@ class YouTubeMgu extends OnlineApp {
     this.gpu.on('ready', (screen, info) => {
       const mode = info && info.modes && info.modes.indexOf('embed') >= 0 ? 'embed' : 'layer';
       this.gpu.mode(mode);
-      const box = mode === 'embed' ? info.embedBox : info.appArea;
+      const box = (mode === 'embed' ? info.embedBox : info && info.appArea) ||
+        { x: 0, y: 0, w: screen && screen.w || 1920, h: screen && screen.h || 720 };
       this.screen = {
         w: box && box.w ? box.w : (screen && screen.w ? screen.w : 1920),
         h: box && box.h ? box.h : (screen && screen.h ? screen.h : 720)

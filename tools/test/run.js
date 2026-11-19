@@ -195,6 +195,11 @@ function testYouTubeMguSourceBuild() {
             packageJson.files.indexOf('npm-shrinkwrap.json') >= 0 &&
             permissions.masterAccessTable.length === 0 && permissions.masterRegistrationTable.length === 0 &&
             shrinkwrap.name === manifest.id && shrinkwrap.version === manifest.version);
+    const app = pkg && JSON.parse(pkg['rhmiData/application.json']).application;
+    const sources = require('../../native/mgu-updater/js/sources.js');
+    const icon = app && sources.entryIcons(app, 'rhmiData/').map((name) => pkg[name]).find(Boolean);
+    check('youtube app: unit build includes an icon discoverable by the Store', icon && sources.isIcon(icon) &&
+        icon.readUInt32BE(16) === 140 && icon.readUInt32BE(20) === 140);
 }
 
 /* A source package whose tree ships no entry point: package.json main

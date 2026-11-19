@@ -76,37 +76,43 @@ function textRequest(url, timeout) {
 
 async function publicWebSearch(text, limit) {
   const n = Math.max(1, Math.min(20, limit || 10));
-  const ids = [];
-  const sources = [
-    'https://html.duckduckgo.com/html/?q=' + encodeURIComponent('site:youtube.com/watch ' + text),
-    'https://www.youtube.com/results?search_query=' + encodeURIComponent(text)
-  ];
-  for (const url of sources) {
-    try {
-      const html = await textRequest(url, 10000);
-      const re = /[?&]v=([A-Za-z0-9_-]{11})/g;
-      let match;
-      while ((match = re.exec(html)) && ids.length < n * 3) {
-        if (ids.indexOf(match[1]) < 0) ids.push(match[1]);
-      }
-      if (ids.length) break;
-    } catch (e) {}
+  const html = await textRequest('https://www.youtube.com/results?search_query=' + encodeURIComponent(text), 10000);
+  const start = html.search(/\bytInitialData\s*=\s*\{/);
+  if (start < 0) throw new Error('YouTube search data unavailable');
+  const open = html.indexOf('{', start);
+  let end = open, depth = 0, quoted = false, escaped = false;
+  for (; end < html.length; end++) {
+    const c = html[end];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') quoted = false;
+    } else if (c === '"') quoted = true;
+    else if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) break;
   }
+  if (depth !== 0) throw new Error('YouTube search data incomplete');
+  const data = JSON.parse(html.slice(open, end + 1));
   const out = [];
-  for (const id of ids) {
-    if (out.length >= n) break;
-    try {
-      const data = await request('https://www.youtube.com/oembed?url=' +
-        encodeURIComponent('https://www.youtube.com/watch?v=' + id) + '&format=json', 5000);
-      out.push({
-        id,
-        title: data.title || 'YouTube video',
-        author: data.author_name || '',
-        duration: 0,
-        thumbnail: data.thumbnail_url || null,
-        provider: 'public-web'
-      });
-    } catch (e) {}
+  const seen = new Set();
+  const stack = [data];
+  const textOf = (value) => value && (value.simpleText || (value.runs || []).map((r) => r.text).join('')) || '';
+  while (stack.length && out.length < n) {
+    const value = stack.pop();
+    if (!value || typeof value !== 'object') continue;
+    const video = value.videoRenderer;
+    if (video && /^[A-Za-z0-9_-]{11}$/.test(video.videoId || '') && !seen.has(video.videoId)) {
+      const title = textOf(video.title);
+      if (title) {
+        seen.add(video.videoId);
+        const thumbnails = video.thumbnail && video.thumbnail.thumbnails;
+        out.push({ id: video.videoId, title, author: textOf(video.ownerText || video.longBylineText),
+          duration: 0, thumbnail: thumbnails && thumbnails.length ? thumbnails[0].url : null, provider: 'public-web' });
+      }
+    } else {
+      const children = Array.isArray(value) ? value : Object.keys(value).map((key) => value[key]);
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
+    }
   }
   if (!out.length) throw new Error('no public search results');
   return out;
@@ -128,7 +134,7 @@ async function search(text, limit) {
   } catch (e) {
     try {
       return await tryAll(PIPED,
-      (base) => base + '/api/v1/search?q=' + query(text) + '&filter=videos',
+      (base) => base + '/search?q=' + query(text) + '&filter=videos',
       (data) => (data.items || []).slice(0, n).map((v) => ({
         id: v.url ? v.url.replace('/watch?v=', '') : v.videoId,
         title: v.title,
@@ -156,7 +162,7 @@ async function trending(limit) {
   } catch (e) {
     try {
       return await tryAll(PIPED,
-        (base) => base + '/api/v1/trending',
+        (base) => base + '/trending?region=US',
         (data) => (data || []).slice(0, n).map((v) => ({
           id: v.url ? v.url.replace('/watch?v=', '') : v.videoId,
           title: v.title, author: v.uploaderName, duration: v.duration || 0,
@@ -173,16 +179,16 @@ async function streams(video) {
     let lastError = null;
     for (const base of PIPED) {
       try {
-        const data = await request(base + '/api/v1/video/' + encodeURIComponent(video.id), 10000);
-        const stream = (data.audioStreams && data.audioStreams[0]) || null;
+        const data = await request(base + '/streams/' + encodeURIComponent(video.id), 10000);
+        const stream = (data.audioStreams || []).find((a) => a.url) || null;
         const muxed = (data.videoStreams || []).filter((v) => v.mimeType && v.mimeType.indexOf('mp4') >= 0 &&
           (v.videoOnly !== true || stream))
           .map((v) => Object.assign({}, v, { height: Number(String(v.quality || '').replace(/[^0-9]/g, '')) || 0 }))
           .sort((a, b) => b.height - a.height)[0];
         if (muxed && muxed.url) return {
           videoUrl: muxed.url,
-          audioUrl: stream && stream.url,
-          muxed: !stream && muxed.videoOnly !== true
+          audioUrl: muxed.videoOnly === true && stream ? stream.url : null,
+          muxed: muxed.videoOnly !== true
         };
       } catch (e) { lastError = e; }
     }
