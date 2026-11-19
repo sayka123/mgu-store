@@ -163,6 +163,25 @@ function testBundleMode() {
         });
 }
 
+function testYouTubeMguSourceBuild() {
+    const appDir = path.join(REPO, 'apps', 'robertn_youtube_mgu');
+    const donorFile = donor.tgz(path.join(tmp('youtube-donor'), 'donor_app@1.0.0.tgz'));
+    const out = path.join(tmp('youtube-out'), 'robertn_youtube_mgu@0.1.1.tgz');
+    let result = null;
+    let error = null;
+    try {
+        result = link.build(appDir, out, { donors: [donorFile], epoch: 1700000000 });
+    } catch (e) {
+        error = e;
+    }
+    const pkg = result && members(out);
+    check('youtube app: unit build links the declared local modules at its new version',
+        result && result.id === 'robertn_youtube_mgu' && result.version === '0.1.1' &&
+            JSON.parse(pkg['package.json']).version === '0.1.1' &&
+            pkg['javascript/app.js'].toString().indexOf("require('./mgu_render_client.js')") >= 0,
+        error && error.message);
+}
+
 /* A source package whose tree ships no entry point: package.json main
  * javascript/runner.js, no file there. */
 function entrylessApp() {
@@ -768,6 +787,7 @@ try {
     testUnitDonors();
     testHostileDonor();
     testBundleMode();
+    testYouTubeMguSourceBuild();
     testEntryPoint();
     testPackSource();
     testModuleMode();

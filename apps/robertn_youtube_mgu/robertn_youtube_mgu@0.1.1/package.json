@@ -1,6 +1,6 @@
 {
   "name": "robertn_youtube_mgu",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Search and play YouTube videos on iDrive",
   "private": false,
   "main": "javascript/runner.js",

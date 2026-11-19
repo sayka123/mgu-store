@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "id": "robertn_youtube_mgu",
-  "version": "0.1.0",
-  "tree": "robertn_youtube_mgu@0.1.0",
+  "version": "0.1.1",
+  "tree": "robertn_youtube_mgu@0.1.1",
   "mguHmi": ["ID8"],
   "modules": [
     "src/app.js",
