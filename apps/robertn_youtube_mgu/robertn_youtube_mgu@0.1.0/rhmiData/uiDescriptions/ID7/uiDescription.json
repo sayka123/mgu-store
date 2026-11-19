@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.3.0",
+  "containers": {
+    "1": {
+      "type": "state",
+      "name": "ST_YouTube_MGU",
+      "components": {
+        "10": {"type":"title","name":"youtubeTitle","properties":{"Visible":{"value":1,"type":"UInt"}},"rows":[{"Text":{"value":"SID_YOUTUBE_MGU_TITLE","type":"StringId"}}]},
+        "20": {"type":"label","name":"youtubeStatus","properties":{"Visible":{"value":1,"type":"UInt"},"Focusable":{"value":0,"type":"UInt"}},"rows":[{"Text":{"value":"SID_YOUTUBE_MGU_LOADING","type":"StringId"}}]},
+        "21": {"type":"button","name":"youtubeSearch","properties":{"Visible":{"value":1,"type":"UInt"},"Focusable":{"value":3,"type":"UInt"}},"rows":[{"Text":{"value":"SID_YOUTUBE_MGU_SEARCH","type":"StringId"}}]},
+        "22": {"type":"button","name":"youtubeList","properties":{"Visible":{"value":1,"type":"UInt"},"Focusable":{"value":3,"type":"UInt"}},"rows":[{"Text1stCol":{"value":"","type":"Text"},"Text2ndCol":{"value":"","type":"Text"}}]},
+        "23": {"type":"button","name":"youtubePlay","properties":{"Visible":{"value":1,"type":"UInt"},"Focusable":{"value":3,"type":"UInt"}},"rows":[{"Text":{"value":"SID_YOUTUBE_MGU_STOP","type":"StringId"}}]}
+      }
+    }
+  }
+}

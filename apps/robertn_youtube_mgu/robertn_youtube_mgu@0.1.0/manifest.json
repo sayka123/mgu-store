@@ -1,0 +1,18 @@
+{
+  "proxies": {
+    "de.bmw.infotainment.hmi.remote.RemoteHmi": "*",
+    "de.bmw.infotainment.hmi.remote.RemoteHmiApplication": "*",
+    "de.bmw.infotainment.hmi.remote2.RemoteHmi2": "*",
+    "de.bmw.infotainment.hmi.remote2.RemoteHmiApplication2": "*",
+    "de.bmw.infotainment.hmi.entrypoint.EntryPoint": "*",
+    "de.bmw.infotainment.hmi.entrypoint2.EntryPoint2": "*",
+    "de.bmw.infotainment.hmi.usecasemanagement.UseCaseInstance": "*",
+    "de.bmw.infotainment.hmi.usecasemanagement.UseCaseProvider": "*",
+    "de.bmw.infotainment.hmi.usecasemanagement.UseCaseRegistry": "*"
+  },
+  "services": {
+    "de.bmw.infotainment.telematic.oap.AppStatus": {
+      "instances": ["${userId}"]
+    }
+  }
+}

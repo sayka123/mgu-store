@@ -1,0 +1,35 @@
+{
+  "name": "robertn_youtube_mgu",
+  "version": "0.1.0",
+  "description": "Search and play YouTube videos on iDrive",
+  "private": false,
+  "main": "javascript/runner.js",
+  "oapAppSettings": {
+    "maxDiskUsage": 67108864,
+    "cpuLimit": 35,
+    "memoryThresholdKB": 262144,
+    "priority": "PRIO_MEDIUM",
+    "visibility": "FOREGROUND",
+    "latencyClass": "FOREGROUND",
+    "loggingId": "YTMG",
+    "userLoginRequired": false,
+    "backgroundPriority": 150,
+    "someipManifest": "manifest.json"
+  },
+  "files": [
+    "javascript",
+    "package.json",
+    "manifest.json",
+    "rhmiData"
+  ],
+  "dependencies": {
+    "oap-sdk": "24.10.2"
+  },
+  "engines": {
+    "node": ">=8.7.0"
+  },
+  "author": "owner",
+  "license": "GPL-3.0-or-later",
+  "mguLocalOnly": true,
+  "mguHmi": ["ID7", "ID8"]
+}
