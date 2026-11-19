@@ -3,6 +3,7 @@
   "id": "robertn_youtube_mgu",
   "version": "0.1.0",
   "tree": "robertn_youtube_mgu@0.1.0",
+  "mguHmi": ["ID8"],
   "modules": [
     "src/app.js",
     "src/provider.js",

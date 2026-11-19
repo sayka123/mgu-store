@@ -31,5 +31,6 @@
   "author": "owner",
   "license": "GPL-3.0-or-later",
   "mguLocalOnly": true,
-  "mguHmi": ["ID7", "ID8"]
+  "mguHmi": ["ID8"],
+  "mguInternet": true
 }
