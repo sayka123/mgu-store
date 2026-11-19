@@ -185,6 +185,7 @@ function testYouTubeMguSourceBuild() {
     const packageJson = pkg && JSON.parse(pkg['package.json']);
     const permissions = pkg && JSON.parse(pkg['permissions.json']);
     const shrinkwrap = pkg && JSON.parse(pkg['npm-shrinkwrap.json']);
+    const appManifest = pkg && JSON.parse(pkg['manifest.json']);
     check('youtube app: unit build links the declared local modules at its new version',
         result && result.id === manifest.id && result.version === manifest.version &&
             JSON.parse(pkg['package.json']).version === manifest.version &&
@@ -193,8 +194,19 @@ function testYouTubeMguSourceBuild() {
     check('youtube app: unit build includes MainApp-required ACL tables and shrinkwrap',
         packageJson && packageJson.files.indexOf('permissions.json') >= 0 &&
             packageJson.files.indexOf('npm-shrinkwrap.json') >= 0 &&
-            permissions.masterAccessTable.length === 0 && permissions.masterRegistrationTable.length === 0 &&
+            permissions.masterAccessTable.some((x) => x.uid === '${APPNAME}' &&
+                x.interfaceName === 'de/bmw/infotainment/hmi/entrypoint2/EntryPointManager2') &&
+            permissions.masterRegistrationTable.some((x) => x.uid === '${APPNAME}' &&
+                x.interfaceName === 'de/bmw/infotainment/telematic/oap/heartbeat/HeartbeatMonitor') &&
             shrinkwrap.name === manifest.id && shrinkwrap.version === manifest.version);
+    check('youtube app: the built ID8 package retains its entry point and resource interfaces',
+        appManifest && [
+            'de.bmw.infotainment.hmi.entrypoint2.EntryPointManager2',
+            'de.bmw.infotainment.hmi.resourcemanagement2.ResourceManager2',
+            'de.bmw.infotainment.hmi.resourcemanagement2.ResourceBundle2',
+            'de.bmw.infotainment.hmi.resourcemanagement2.StringBundle2',
+            'de.bmw.infotainment.telematic.oap.PrivateEntryPoint2'
+        ].every((name) => !!appManifest.proxies[name]));
     const app = pkg && JSON.parse(pkg['rhmiData/application.json']).application;
     const sources = require('../../native/mgu-updater/js/sources.js');
     const icon = app && sources.entryIcons(app, 'rhmiData/').map((name) => pkg[name]).find(Boolean);

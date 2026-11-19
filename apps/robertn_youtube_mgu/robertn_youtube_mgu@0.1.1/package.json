@@ -20,6 +20,7 @@
     "javascript",
     "package.json",
     "manifest.json",
+    "permissions.json",
     "rhmiData"
   ],
   "dependencies": {
