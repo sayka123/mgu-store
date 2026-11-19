@@ -41,10 +41,16 @@ class Player {
     this.width = 1280;
     this.height = 720;
     this.onError = null;
+    this.audioDevice = typeof process.env.MGU_AUDIO_DEVICE === 'string' && process.env.MGU_AUDIO_DEVICE.trim() ?
+      process.env.MGU_AUDIO_DEVICE.trim() : 'default';
+    this.generation = 0;
+    this.errorReported = false;
   }
 
-  start(url, width, height, audioUrl) {
+  start(url, width, height, audioUrl, muxed) {
     this.stop();
+    const generation = this.generation;
+    this.errorReported = false;
     if (!fs.existsSync('/dev/shm')) throw new Error('/dev/shm unavailable');
     this.width = evenLimit(width || 1280, 16, 2048);
     this.height = evenLimit(height || 720, 16, 2048);
@@ -59,16 +65,19 @@ class Player {
     header.writeUInt32LE(NSLOT, 24);
     fs.writeSync(this.fd, header, 0, header.length, 0);
 
-    this.resolveInput(url).then((input) => this.launchFfmpeg(input))
+    this.resolveInput(url, audioUrl, muxed).then((input) => {
+      if (generation === this.generation) this.launchFfmpeg(input, generation);
+    })
       .catch((e) => {
-        this.log.error && this.log.error('YouTube stream unavailable: ' + e.message);
-        if (this.onError) this.onError(e);
+        this.fail(e, generation);
       });
     return FILE;
   }
 
-  resolveInput(url) {
-    if (!/^https:\/\/www\.youtube\.com\/watch\?/.test(url)) return Promise.resolve(url);
+  resolveInput(url, audioUrl, muxed) {
+    if (!/^https:\/\/www\.youtube\.com\/watch\?/.test(url)) {
+      return Promise.resolve({ videoUrl: url, audioUrl: audioUrl || null, muxed: !!muxed });
+    }
     const candidates = ['/usr/bin/yt-dlp', '/usr/local/bin/yt-dlp',
       '/opt/homebrew/bin/yt-dlp', '/opt/homebrew/bin/youtube-dl',
       '/usr/bin/youtube-dl', '/usr/local/bin/youtube-dl'];
@@ -77,41 +86,105 @@ class Player {
     return new Promise((resolve, reject) => {
       this.extractor = cp.execFile(executable, [
         '--no-warnings', '--no-playlist',
-        '-f', 'b[protocol^=http]/bv*+ba/b',
-        '-g', url
-      ], { timeout: 25000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+        '-f', 'b[ext=mp4][protocol^=http]/b[protocol^=http]/bv*+ba/b',
+        '-j', url
+      ], { timeout: 25000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
         this.extractor = null;
         if (err) return reject(err);
-        const lines = String(stdout).trim().split(/\r?\n/).filter(Boolean);
-        if (!lines.length) return reject(new Error('yt-dlp returned no stream URL'));
-        resolve(lines[0]);
+        try {
+          const info = JSON.parse(String(stdout));
+          const formats = info.requested_formats && info.requested_formats.length ?
+            info.requested_formats : [info];
+          const video = formats.find((format) => format.url && format.vcodec && format.vcodec !== 'none');
+          const audio = formats.find((format) => format.url && format.acodec && format.acodec !== 'none' &&
+            (!format.vcodec || format.vcodec === 'none'));
+          const videoUrl = video ? video.url : info.url;
+          if (!videoUrl) return reject(new Error('yt-dlp returned no video stream URL'));
+          const selectedAudio = audioUrl || (audio && audio.url) || null;
+          const muxedFormat = !!(video && video.acodec && video.acodec !== 'none');
+          const hasAudio = !!(selectedAudio || muxedFormat);
+          resolve({
+            videoUrl,
+            audioUrl: selectedAudio,
+            muxed: !!muxed || (!selectedAudio && muxedFormat),
+            hasAudio,
+            httpHeaders: info.http_headers || (video && video.http_headers) || {},
+            downloadUrl: !selectedAudio && muxedFormat ? url : null,
+            extractor: executable
+          });
+        } catch (e) {
+          reject(new Error('yt-dlp returned invalid stream metadata'));
+        }
       });
     });
   }
 
-  launchFfmpeg(input) {
-    if (!input) throw new Error('empty media stream');
-    this.proc = cp.spawn('ffmpeg', [
+  launchFfmpeg(input, generation) {
+    const media = typeof input === 'string' ? { videoUrl: input, muxed: true } : input;
+    if (!media || !media.videoUrl) throw new Error('empty media stream');
+    const streamedInput = !!media.downloadUrl;
+    const audioUrl = streamedInput ? null : (media.audioUrl || null);
+    const audioInput = audioUrl ? 1 : 0;
+    const inputUrl = streamedInput ? 'pipe:0' : media.videoUrl;
+    const args = [
       '-hide_banner', '-loglevel', 'error',
-      '-re', '-fflags', '+discardcorrupt',
-      '-i', input,
+      '-re', '-fflags', '+discardcorrupt'
+    ];
+    const userAgent = media.httpHeaders && media.httpHeaders['User-Agent'];
+    const addInput = (url) => {
+      if (userAgent) args.push('-headers', 'User-Agent: ' + userAgent + '\r\n');
+      args.push('-i', url);
+    };
+    if (streamedInput) args.push('-i', inputUrl);
+    else addInput(inputUrl);
+    if (audioUrl) {
+      args.push('-re');
+      addInput(audioUrl);
+    }
+    args.push(
+      '-map', '0:v:0',
       '-vf', 'scale=' + this.width + ':' + this.height +
         ':force_original_aspect_ratio=decrease,pad=' + this.width + ':' + this.height +
         ':(ow-iw)/2:(oh-ih)/2',
-      '-r', '30', '-an', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
-    this.proc.stderr.on('data', (c) => this.log.warn && this.log.warn('ffmpeg: ' + c.toString().trim()));
-    this.proc.on('error', (e) => {
-      this.log.error && this.log.error('ffmpeg unavailable: ' + e.message);
-      if (this.onError) this.onError(e);
+      '-r', '30', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'
+    );
+    if (audioUrl || media.muxed) {
+      args.push('-map', audioInput + ':a:0?', '-vn', '-f', 'alsa', this.audioDevice);
+    }
+    const run = generation === undefined ? this.generation : generation;
+    const proc = cp.spawn('ffmpeg', args, { stdio: [streamedInput ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+    this.proc = proc;
+    proc.stderr.on('data', (c) => this.log.warn && this.log.warn('ffmpeg: ' + c.toString().trim()));
+    proc.on('error', (e) => {
+      this.fail(new Error('ffmpeg unavailable: ' + e.message), run);
     });
-    this.proc.on('exit', (code) => {
-      if (code && code !== null) this.log.warn && this.log.warn('ffmpeg exited ' + code);
+    proc.on('exit', (code, signal) => {
+      if (this.proc === proc) this.proc = null;
+      if (code !== 0 && code !== null) {
+        this.fail(new Error('ffmpeg exited ' + code + (signal ? ' (' + signal + ')' : '')), run);
+      }
     });
+    if (streamedInput) {
+      const extractor = cp.spawn(media.extractor, [
+        '--quiet', '--no-warnings', '--no-progress', '--no-playlist',
+        '-f', 'b[ext=mp4][protocol^=http]/b[protocol^=http]',
+        '-o', '-', media.downloadUrl
+      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+      this.extractor = extractor;
+      extractor.stderr.on('data', () => {});
+      extractor.on('error', (e) => {
+        this.fail(new Error('yt-dlp unavailable: ' + e.message), run);
+      });
+      extractor.on('exit', (code) => {
+        if (code !== 0 && code !== null) this.fail(new Error('yt-dlp download failed (' + code + ')'), run);
+      });
+      proc.stdin.on('error', () => {});
+      extractor.stdout.pipe(proc.stdin);
+    }
 
     let pending = Buffer.alloc(0);
     const frameBytes = this.width * this.height * 3;
-    this.proc.stdout.on('data', (chunk) => {
+    proc.stdout.on('data', (chunk) => {
       pending = Buffer.concat([pending, chunk]);
       while (pending.length >= frameBytes) {
         const rgb = pending.slice(0, frameBytes);
@@ -119,6 +192,14 @@ class Player {
         this.writeFrame(rgb);
       }
     });
+  }
+
+  fail(error, generation) {
+    if (generation !== this.generation || this.errorReported) return;
+    this.errorReported = true;
+    this.log.error && this.log.error('YouTube playback unavailable: ' + error.message);
+    this.stop();
+    if (this.onError) this.onError(error);
   }
 
   writeFrame(rgb) {
@@ -135,6 +216,7 @@ class Player {
   }
 
   stop() {
+    this.generation++;
     if (this.extractor) {
       try { this.extractor.kill('SIGTERM'); } catch (e) {}
       this.extractor = null;
@@ -143,14 +225,14 @@ class Player {
       try { this.proc.kill('SIGTERM'); } catch (e) {}
       this.proc = null;
     }
-  }
-
-  close() {
-    this.stop();
     if (this.fd !== null) {
       try { fs.closeSync(this.fd); } catch (e) {}
       this.fd = null;
     }
+  }
+
+  close() {
+    this.stop();
   }
 }
 

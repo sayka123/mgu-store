@@ -190,7 +190,7 @@ class YouTubeMgu extends OnlineApp {
         this.gpu.show(false);
         this.renderList();
       };
-      const file = this.player.start(url, box.w, box.h, streams.audioUrl);
+      const file = this.player.start(url, box.w, box.h, streams.audioUrl, streams.muxed);
       this.gpu.video(1, file);
       this.gpu.show(true);
       this.status = 'Playing';

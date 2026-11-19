@@ -175,10 +175,15 @@ async function streams(video) {
       try {
         const data = await request(base + '/api/v1/video/' + encodeURIComponent(video.id), 10000);
         const stream = (data.audioStreams && data.audioStreams[0]) || null;
-        const muxed = (data.videoStreams || []).filter((v) => v.mimeType && v.mimeType.indexOf('mp4') >= 0)
+        const muxed = (data.videoStreams || []).filter((v) => v.mimeType && v.mimeType.indexOf('mp4') >= 0 &&
+          (v.videoOnly !== true || stream))
           .map((v) => Object.assign({}, v, { height: Number(String(v.quality || '').replace(/[^0-9]/g, '')) || 0 }))
           .sort((a, b) => b.height - a.height)[0];
-        if (muxed && muxed.url) return { videoUrl: muxed.url, audioUrl: stream && stream.url };
+        if (muxed && muxed.url) return {
+          videoUrl: muxed.url,
+          audioUrl: stream && stream.url,
+          muxed: !stream && muxed.videoOnly !== true
+        };
       } catch (e) { lastError = e; }
     }
     throw lastError || new Error('no Piped stream');
@@ -190,7 +195,7 @@ async function streams(video) {
       try {
         const data = await request(base + '/api/v1/videos/' + encodeURIComponent(video.id), 10000);
         const muxed = (data.formatStreams || []).slice().sort((a, b) => (b.height || 0) - (a.height || 0))[0];
-        if (muxed && muxed.url) return { videoUrl: muxed.url };
+        if (muxed && muxed.url) return { videoUrl: muxed.url, muxed: true };
       } catch (e) { lastError = e; }
     }
   }
