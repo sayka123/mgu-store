@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.27
+
 - Source packages built on the unit receive the required AppManager permissions tables and npm shrinkwrap, listed in the package manifest.
 
 ## 0.8.23
