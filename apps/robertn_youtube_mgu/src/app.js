@@ -10,6 +10,7 @@ const { spell } = require('./speller.js');
 const { RenderClient, videoOp } = require('./mgu_render_client.js');
 
 const logger = logging.getSDKLogger();
+const SEARCH_KEYS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.split('').concat(['Space', 'Backspace', 'Find', 'Cancel']);
 
 class YouTubeMgu extends OnlineApp {
   constructor() {
@@ -31,6 +32,14 @@ class YouTubeMgu extends OnlineApp {
     this.screen = { w: 1920, h: 720 };
     this.fullscreen = null;
     this.lastKnob = null;
+    this.keyboard = null;
+    this.searchSequence = 0;
+    this.renderRevision = 0;
+    this.rendering = false;
+    this.rowCount = null;
+    this.actionById = {};
+    this.lastAction = {};
+    this.actionCount = 0;
   }
 
   start() {
@@ -64,14 +73,19 @@ class YouTubeMgu extends OnlineApp {
   }
 
   loadTrending() {
+    const sequence = this.searchSequence;
     return provider.trending(12)
       .then((items) => {
+        if (sequence !== this.searchSequence) return;
         this.results = items;
-        this.status = 'Trending';
+        if (this.keyboard) this.keyboard.status = 'Trending';
+        else this.status = 'Trending';
         this.renderList();
       })
       .catch((e) => {
-        this.status = 'Search unavailable';
+        if (sequence !== this.searchSequence) return;
+        if (this.keyboard) this.keyboard.status = 'Search unavailable';
+        else this.status = 'Search unavailable';
         logger.warn('YouTube MGU startup failed: ' + e.message);
         this.renderList();
       });
@@ -90,11 +104,34 @@ class YouTubeMgu extends OnlineApp {
       throw new Error('YouTube MGU RHMI states are missing');
     }
 
-    this.searchComponent && this.searchComponent.on('action', () => this.openSearch());
-    this.listComponent.on('action', (ev) => this.playRow(ev && ev.row));
-    this.playComponent && this.playComponent.on('action', () => this.stop());
+    this.bindAction(this.searchComponent, () => this.keyboard ? this.submitKeyboard() : this.openSearch());
+    this.bindAction(this.listComponent, (row) => this.keyboard ? this.keyboardRow(row) : this.playRow(row));
+    this.bindAction(this.playComponent, () => this.keyboard ? this.cancelKeyboard() : this.stop());
+    this.rhmi.on('userEvent', (ev) => {
+      const action = ev && ev.eventType === 'ACTION' && this.actionById[Number(ev.sourceId)];
+      if (action) this.press(action, Number((ev.parameterMap || {})[2]) || 0, 'rhmi');
+    });
     this.rhmi.on('restoreHmi', () => this.renderList());
     return this.mainState.updateResources();
+  }
+
+  bindAction(component, handler) {
+    if (!component) return;
+    const action = { handler, key: ++this.actionCount };
+    if (typeof component.getId === 'function') this.actionById[Number(component.getId())] = action;
+    component.on('action', (ev) => this.press(action, Number(ev && ev.row) || 0, 'component'));
+  }
+
+  press(action, row, source) {
+    const key = action.key + ':' + row;
+    const now = Date.now();
+    const last = this.lastAction[key];
+    if (last && last.source !== source && now - last.time < 400) {
+      delete this.lastAction[key];
+      return;
+    }
+    this.lastAction[key] = { source, time: now };
+    action.handler(row);
   }
 
   setupHttp() {
@@ -168,14 +205,17 @@ class YouTubeMgu extends OnlineApp {
   }
 
   search(text) {
+    const sequence = ++this.searchSequence;
     this.status = 'Searching';
     this.renderList();
     provider.search(text, 12).then((items) => {
+      if (sequence !== this.searchSequence) return;
       this.results = items;
       this.focus = 0;
       this.status = 'Search: ' + text;
       this.renderList();
     }).catch((e) => {
+      if (sequence !== this.searchSequence) return;
       this.status = 'Search failed';
       logger.warn('YouTube search failed: ' + e.message);
       this.renderList();
@@ -186,10 +226,44 @@ class YouTubeMgu extends OnlineApp {
     spell(this, 'YouTube search').then((text) => {
       if (text && text.trim()) this.search(text.trim());
     }).catch((e) => {
-      this.status = 'Phone search available';
       logger.warn('HMI speller unavailable: ' + e.message);
+      this.keyboard = { text: '', status: this.status };
+      this.focus = 0;
       this.renderList();
     });
+  }
+
+  keyboardRow(row) {
+    const key = SEARCH_KEYS[row];
+    if (!key || !this.keyboard) return;
+    if (key === 'Find') return this.submitKeyboard();
+    if (key === 'Cancel') return this.cancelKeyboard();
+    this.keyboard.error = null;
+    if (key === 'Backspace') this.keyboard.text = this.keyboard.text.slice(0, -1);
+    else if (this.keyboard.text.length < 80) this.keyboard.text += key === 'Space' ? ' ' : key;
+    else this.keyboard.error = 'Search is limited to 80 characters';
+    this.renderList();
+  }
+
+  submitKeyboard() {
+    if (!this.keyboard) return;
+    const text = this.keyboard.text.trim();
+    if (!text) {
+      this.keyboard.error = 'Enter a search term';
+      this.renderList();
+      return;
+    }
+    this.keyboard = null;
+    this.focus = 0;
+    this.search(text);
+  }
+
+  cancelKeyboard() {
+    if (!this.keyboard) return;
+    this.status = this.keyboard.status;
+    this.keyboard = null;
+    this.focus = 0;
+    this.renderList();
   }
 
   playRow(row) {
@@ -236,24 +310,39 @@ class YouTubeMgu extends OnlineApp {
 
   renderList() {
     if (!this.statusComponent || !this.listComponent) return;
-    Promise.resolve(this.statusComponent.setValue(0, 'Text', this.status, 'Text'))
-      .catch((e) => logger.warn('status render failed: ' + e.message));
-    Promise.resolve(this.listComponent.setRowCount(this.results.length))
+    const revision = ++this.renderRevision;
+    if (this.rendering) return;
+    this.rendering = true;
+    const keyboard = this.keyboard;
+    const rows = keyboard ? SEARCH_KEYS.map((key) => ({ title: key })) : this.results.slice();
+    const status = keyboard ? (keyboard.error || 'Search: ' + keyboard.text) : this.status;
+    const buttonCell = this.hmi === 'ID8' ? 'PrimaryText' : 'Text';
+    const rowCell = this.hmi === 'ID8' ? 'PrimaryText' : 'Text1stCol';
+    const authorCell = this.hmi === 'ID8' ? 'FrequencyText' : 'Text2ndCol';
+    Promise.resolve()
+      .then(() => Promise.all([
+        this.statusComponent.setValue(0, 'Text', status, 'Text'),
+        this.searchComponent && this.searchComponent.setValue(0, buttonCell, keyboard ? 'Find' : 'Search', 'Text'),
+        this.playComponent && this.playComponent.setValue(0, buttonCell, keyboard ? 'Cancel' : 'Stop playback', 'Text')
+      ]))
       .then(() => {
-        this.results.forEach((item, i) => {
-          const title = item.title;
-          const author = item.author ? '  ' + item.author : '';
-          const primary = i === this.focus ? '> ' + title : title;
-          if (this.hmi === 'ID8') {
-            Promise.resolve(this.listComponent.setValue(i, 'PrimaryText', primary, 'Text')).catch(() => {});
-            Promise.resolve(this.listComponent.setValue(i, 'FrequencyText', author, 'Text')).catch(() => {});
-          } else {
-            Promise.resolve(this.listComponent.setValue(i, 'Text1stCol', primary, 'Text')).catch(() => {});
-            Promise.resolve(this.listComponent.setValue(i, 'Text2ndCol', author, 'Text')).catch(() => {});
-          }
-        });
+        if (this.rowCount === rows.length) return;
+        return Promise.resolve(this.listComponent.setRowCount(rows.length))
+          .then(() => { this.rowCount = rows.length; });
       })
-      .catch((e) => logger.warn('list render failed: ' + e.message));
+      .then(() => {
+        if (revision !== this.renderRevision) return;
+        return Promise.all(rows.reduce((writes, item, i) => {
+          writes.push(this.listComponent.setValue(i, rowCell, item.title, 'Text'));
+          writes.push(this.listComponent.setValue(i, authorCell, item.author ? '  ' + item.author : '', 'Text'));
+          return writes;
+        }, []));
+      })
+      .catch((e) => logger.warn('list render failed: ' + e.message))
+      .then(() => {
+        this.rendering = false;
+        if (revision !== this.renderRevision) this.renderList();
+      });
   }
 
   handleHttp(req, res) {

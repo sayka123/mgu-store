@@ -8,11 +8,18 @@ let app;
 const warnings = [];
 const calls = [];
 let finishTrending;
+let spellerError = null;
+let searched = null;
+let nextId = 1;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const component = () => {
   const c = new EventEmitter();
-  c.setValue = () => Promise.resolve();
-  c.setRowCount = () => Promise.resolve();
+  const id = nextId++;
+  c.values = {};
+  c.sizes = [];
+  c.getId = () => id;
+  c.setValue = (row, cell, value) => { c.values[row + ':' + cell] = value; return Promise.resolve(); };
+  c.setRowCount = (n) => { c.rows = n; c.sizes.push(n); return Promise.resolve(); };
   c.updateResources = () => { calls.push('resources'); return Promise.resolve(); };
   return c;
 };
@@ -66,7 +73,7 @@ class Player {
 }
 const provider = {
   trending: () => new Promise((resolve) => { calls.push('trending'); finishTrending = resolve; }),
-  search: () => Promise.reject(new Error('offline')),
+  search: (text) => { searched = text; return Promise.reject(new Error('offline')); },
   streams: () => Promise.reject(new Error('stream unavailable'))
 };
 Module._load = function (request, parent, isMain) {
@@ -75,7 +82,7 @@ Module._load = function (request, parent, isMain) {
     warn: (s) => warnings.push(s), error: (s) => warnings.push(s) }) };
   if (request === './provider.js') return provider;
   if (request === './player.js') return { Player };
-  if (request === './speller.js') return { spell: () => Promise.resolve('') };
+  if (request === './speller.js') return { spell: () => spellerError ? Promise.reject(spellerError) : Promise.resolve('') };
   if (request === './mgu_render_client.js') return { RenderClient: Renderer, videoOp: () => [] };
   if (request === 'http') return { createServer: () => ({ on() {}, listen() {}, close() {} }) };
   return originalLoad.call(this, request, parent, isMain);
@@ -99,6 +106,36 @@ Module._load = originalLoad;
   rhmi.opened = null;
   app.emit('entryPointExecute', 'entry');
   assert.strictEqual(rhmi.opened, 'entry');
+  spellerError = new Error('speller unavailable');
+  controls.youtubeSearch.emit('action', { row: 0 });
+  await tick();
+  await tick();
+  assert(app.keyboard);
+  assert.strictEqual(controls.youtubeList.rows, 40);
+  assert.strictEqual(controls.youtubeList.values['0:PrimaryText'], 'A');
+  rhmi.emit('userEvent', { eventType: 'ACTION', sourceId: controls.youtubeList.getId(), parameterMap: { 2: 1 } });
+  controls.youtubeList.emit('action', { row: 1 });
+  assert.strictEqual(app.keyboard.text, 'B');
+  controls.youtubeList.emit('action', { row: 1 });
+  assert.strictEqual(app.keyboard.text, 'BB');
+  await tick();
+  assert.strictEqual(controls.youtubeList.sizes.filter((n) => n === 40).length, 1);
+  app.keyboardRow(12);
+  app.keyboardRow(36);
+  app.keyboardRow(37);
+  assert.strictEqual(app.keyboard.text, 'BBM');
+  controls.youtubeSearch.emit('action', { row: 0 });
+  await tick();
+  assert.strictEqual(searched, 'BBM');
+  assert.strictEqual(app.keyboard, null);
+  assert.strictEqual(app.status, 'Search failed');
+  app.openSearch();
+  await tick();
+  app.submitKeyboard();
+  await tick();
+  assert.strictEqual(controls.youtubeStatus.values['0:Text'], 'Enter a search term');
+  app.cancelKeyboard();
+  assert.strictEqual(app.keyboard, null);
   app.search('BMW iX');
   await tick();
   assert.strictEqual(app.status, 'Search failed');
