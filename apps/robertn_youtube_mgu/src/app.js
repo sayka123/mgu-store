@@ -37,17 +37,34 @@ class YouTubeMgu extends OnlineApp {
     this.on('initialized', () => this.initialize());
     this.on('shutdown', () => this.shutdown());
     this.on('error', (e) => logger.warn('app error: ' + (e && e.message)));
-    this.on('entryPointExecute', () => this.open());
+    this.on('entryPointExecute', (uuid) => this.open(uuid));
     return super.start();
   }
 
   initialize() {
-    Promise.resolve()
+    if (!this.rhmiApplication) return this.initialized();
+    const data = this.getVisibilityData && this.getVisibilityData();
+    const reason = (data && data.reason) || this.startReason;
+    const foreground = ['ENTRY_POINT', 'LUM', 'BOOKMARK', 'START_WIDGET', 'TRIGGER_HMI', 'SPEECH_COMMAND'].includes(reason);
+    return Promise.resolve()
       .then(() => this.setupRhmi())
       .then(() => this.setupHttp())
       .then(() => this.setupRenderer())
       .then(() => this.registerEntryPoints())
-      .then(() => provider.trending(12))
+      .then(() => {
+        if (foreground) this.registerActive();
+        return this.initialized();
+      })
+      .then(() => {
+        const uuid = this.getLastExecutedEntryPointUuid && this.getLastExecutedEntryPointUuid();
+        if (uuid) this.open(uuid);
+        this.loadTrending();
+      })
+      .catch((e) => logger.error('YouTube MGU initialization failed: ' + e.message));
+  }
+
+  loadTrending() {
+    return provider.trending(12)
       .then((items) => {
         this.results = items;
         this.status = 'Trending';
@@ -57,9 +74,7 @@ class YouTubeMgu extends OnlineApp {
         this.status = 'Search unavailable';
         logger.warn('YouTube MGU startup failed: ' + e.message);
         this.renderList();
-      })
-      .then(() => this.initialized())
-      .catch((e) => logger.error('YouTube MGU initialization failed: ' + e.message));
+      });
   }
 
   setupRhmi() {
@@ -79,22 +94,26 @@ class YouTubeMgu extends OnlineApp {
     this.listComponent.on('action', (ev) => this.playRow(ev && ev.row));
     this.playComponent && this.playComponent.on('action', () => this.stop());
     this.rhmi.on('restoreHmi', () => this.renderList());
+    return this.mainState.updateResources();
   }
 
   setupHttp() {
     if (this.server) return;
     this.server = http.createServer((req, res) => this.handleHttp(req, res));
+    this.server.on('error', (e) => logger.warn('phone server unavailable: ' + e.message));
     this.server.listen(8471, '0.0.0.0');
   }
 
   registerEntryPoints() {
-    if (!this.getEntryPoints) return;
     const descriptions = (this.appDescription &&
       this.appDescription.application.entryPoints) || [];
     const ours = this.getEntryPoints().find((ep) =>
       descriptions.some((d) => d.uuid === ep.getDescription().uuid));
     if (!ours) throw new Error('no YouTube MGU entry point handed over by the manager');
-    return ours.setAvailability(true).then(() => ours.setSelected(true));
+    const uuid = ours.getDescription().uuid;
+    return ours.init()
+      .then(() => this.rhmi.mapEntryState(uuid, this.mainState))
+      .then(() => ours.setAvailability('ENABLED'));
   }
 
   setupRenderer() {
@@ -142,9 +161,9 @@ class YouTubeMgu extends OnlineApp {
     this.gpu.connect();
   }
 
-  open() {
-    if (!this.rhmiApplication || !this.mainState) return;
-    Promise.resolve(this.rhmiApplication.openState('ST_YouTube_MGU'))
+  open(uuid) {
+    if (!this.rhmiApplication || !this.mainState || !uuid) return;
+    Promise.resolve(this.rhmiApplication.openEntryState(uuid))
       .catch((e) => logger.warn('open YouTube MGU: ' + e.message));
   }
 
